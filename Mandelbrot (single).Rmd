@@ -1,0 +1,178 @@
+---
+title: "Mandelbrot"
+author: "Bram van Smoorenburg"
+date: "20 March 2018"
+output: html_document
+---
+
+basics
+```{r}
+legheight=500
+height=2e4 #max 20k
+width=2e4 #max 20k
+limit=100
+```
+
+start and end
+```{r}
+starttopleft=c(-2,2)
+startbotright=c(2,-2)
+```
+
+library
+```{r}
+library(png)
+library(abind)
+```
+
+legend colors
+```{r}
+cols=matrix(0,3,limit)
+colloc=round(seq(1,limit,length.out = 8))
+cols[1,1:colloc[3]]=1
+cols[1,colloc[3]:colloc[4]]=seq(1,0,length.out = colloc[4]-colloc[3]+1)
+cols[1,colloc[6]:colloc[7]]=seq(0,1,length.out = colloc[7]-colloc[6]+1)
+cols[1,colloc[7]:limit]=seq(1,0,length.out = limit-colloc[7]+1)
+cols[2,1:colloc[2]]=seq(1,0,length.out = colloc[2])
+cols[2,colloc[2]:colloc[3]]=seq(0,1,length.out = colloc[3]-colloc[2]+1)
+cols[2,colloc[3]:colloc[5]]=1
+cols[2,colloc[5]:colloc[6]]=seq(1,0,length.out = colloc[6]-colloc[5]+1)
+cols[3,1:colloc[2]]=seq(1,0,length.out = colloc[2])
+cols[3,colloc[4]:colloc[5]]=seq(0,1,length.out = colloc[5]-colloc[4]+1)
+cols[3,colloc[5]:colloc[7]]=1
+cols[3,colloc[7]:limit]=seq(1,0,length.out = limit-colloc[7]+1)
+```
+
+complex plane
+```{r}
+complane=function(n,mat=indexmat) {
+  rowp=trunc(n/10^ceiling(log10(ncol(mat+1))))-0.5
+  colp=n-(rowp+0.5)*10^ceiling(log10(ncol(mat+1)))-0.5
+  real=ctopleft[1]+cwidth*colp
+  imag=ctopleft[2]-cheight*rowp
+  return(complex(real=real,imaginary = imag))
+}
+```
+
+making complex plane
+```{r}
+ctopleft=starttopleft
+cbotright=startbotright
+cwidth=(cbotright[1]-ctopleft[1])/width
+cheight=(ctopleft[2]-cbotright[2])/height
+mandelmat=matrix(0,height,width)
+indexmat=row(mandelmat)*10^ceiling(log10(ncol(mandelmat+1)))+col(mandelmat)
+mandelmat[1,1]=complane(indexmat[1,1])
+mandelmat[1,width]=complane(indexmat[1,width])
+mandelmat[height,1]=complane(indexmat[height,1])
+mandelmat[height,width]=complane(indexmat[height,width])
+mandelmat[1,]=seq(mandelmat[1,1],mandelmat[1,width],length.out = width)
+mandelmat[height,]=seq(mandelmat[height,1],mandelmat[height,width],length.out = width)
+for (q in 1:width) {
+  mandelmat[,q]=seq(mandelmat[1,q],mandelmat[height,q],length.out = height)
+}
+```
+
+mandelbrot function
+```{r}
+manfunc=function(c,zstart=0,lim=limit) {
+  z=zstart
+  loop=FALSE
+  mu=1-sqrt(1-4*c)
+  if (zstart==0&&sqrt(Re(mu)^2+Im(mu)^2)<1) {
+    return(lim)
+  } else {
+    for (b in 1:lim) {
+    iteration=b
+    z=z^2+c
+    if (sqrt(Re(z)^2+Im(z)^2)>2) {
+      break
+    }
+  }
+  return(iteration)
+  }
+}
+
+```
+
+split a matrix into equal parts
+```{r}
+splitmat=function(mat,n,byrow=TRUE) {
+  if (byrow) {
+    if (n>nrow(mat)) {
+      stop("more splits than rows, nrow=",nrow(mat))
+    }
+    outrows=round(seq(0,nrow(mat),length.out = n+1))
+    return(lapply(2:(n+1),function(y){mat[(outrows[y-1]+1):outrows[y],,drop=FALSE]}))
+  } else {
+    if (n>ncol(mat)) {
+      stop("more splits than columns, ncol=",ncol(mnat))
+    }
+    outcols=round(seq(0,ncol(mat),length.out = n+1))
+    return(lapply(2:(n+1),function(y){mat[,(outcols[y-1]+1):outcols[y],drop=FALSE]}))
+  }
+}
+```
+
+parallel computing
+```{r}
+rm(indexmat)
+library(parallel)
+clusters=6
+clu=makeCluster(clusters)
+mandelmat=splitmat(mandelmat,5*clusters)
+manset=parLapplyLB(clu,mandelmat,function(x,manfunc=manfunc,limit=limit){apply(x,c(1,2),manfunc,lim=limit)},manfunc=manfunc,limit=limit)
+manset=do.call(rbind,manset)
+#manset=apply(mandelmat,c(1,2),manfunc)
+```
+
+
+apply color image
+```{r}
+getcol=function(n,color=cols) {
+  return(color[,n])
+}
+```
+
+mandelbrot set image
+```{r}
+rm(mandelmat)
+manset=splitmat(manset,clusters)
+manimg=parLapply(clu,manset,function(x,getcol=getcol,cols=cols){apply(x,c(1,2),getcol,color=cols)},getcol=getcol,cols=cols)
+manimg=lapply(manimg,function(x){aperm(x,c(2,3,1))})
+manimg=do.call(abind,c(manimg,along=1))
+#manimg=apply(manset,c(1,2),getcol)
+#manimg=aperm(manimg,c(2,3,1))
+```
+
+legend
+```{r}
+rm(manset)
+legen=array(1,c(legheight+1,width,3))
+leghalf=ceiling(legheight/2)
+legen[1:(leghalf-1),seq(1,width,length.out = 11),]=0
+if (width!=limit) {
+  legcol=t(apply(cols,1,function(a){approx(a,n=width)$y}))
+} else {
+  legcol=cols
+}
+legen[leghalf,,1]=legcol[1,]
+legen[leghalf,,2]=legcol[2,]
+legen[leghalf,,3]=legcol[3,]
+for (a in 1:(legheight-leghalf)) {
+  legen[leghalf+a,,]=legen[leghalf,,]
+}
+legen[legheight+1,,]=0
+```
+
+full image
+```{r}
+manimg=abind(legen,manimg,along = 1)
+```
+
+saving
+```{r}
+writePNG(manimg,"./mandelbrot set out.png")
+stopCluster(clu)
+gc()
+```
