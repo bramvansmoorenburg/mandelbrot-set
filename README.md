@@ -1,5 +1,5 @@
 # mandelbrot-set
-generating images from the mandelbrot set.
+generating images from the mandelbrot set. calculates the value for each pixel and generates a png file.
 
 ##  single
 generate a single mandelbrot set image
